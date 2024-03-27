@@ -184,7 +184,7 @@ def plot_frequencies(freqs_xy, freqs_z, dna_chain):
     color_map = plt.get_cmap(cmaps_picker.value_name)
 
     b = ax.bar(tag, freqs, color = color_map(norm_seq))
-    ax.bar_label(b, label_type = 'edge', fontsize = 6, fmt = '{:,.2f}')
+    ax.bar_label(b, label_type = 'edge', fontsize = 6, fmt = '%.2f')
 
     return fig
 
