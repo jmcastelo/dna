@@ -213,7 +213,7 @@ def set_freqs_table_data(freqs_xy, freqs_z):
 
 
 # Input widgets
-chain_input = pn.widgets.TextInput(name = 'DNA sequence:', placeholder = 'DNA sequence...')
+chain_input = pn.widgets.TextInput(name = 'DNA sequence:', placeholder = 'DNA sequence...', sizing_mode = 'stretch_width')
 distance_input = pn.widgets.FloatInput(name = 'Distance (Angstrom):', value = 3.4, step = 0.1, start = 1.0e-6)
 twist_angle_input = pn.widgets.FloatInput(name = 'Twist angle (rad):', value = pi / 5, step = 0.01, start = 0.0, end = 2 * pi)
 max_xy_mode_input = pn.widgets.IntInput(name = 'Max. transverse mode:', value = 2, start = 1)
@@ -274,13 +274,15 @@ pn.bind(compute_vibrational_modes, compute_button, watch = True)
 
 output_box = pn.FlexBox(freqs_table, freqs_pane, align_content = 'center', align_items = 'center', justify_content = 'space-evenly')
 
+main_layout = pn.Column(chain_input, output_box)
+
 links_pane = pn.pane.HTML('''<a href="https://doi.org/10.1016/j.jtbi.2015.11.018">Reference</a>''')
 
 cmaps_text = pn.widgets.StaticText(name = '', value = 'Colormap:')
 cmaps_column = pn.Column(cmaps_text, cmaps_picker)
 
-template = pn.template.BootstrapTemplate(title = 'DNA Electronic Quantum Vibrational Modes', sidebar = [chain_input, distance_input, twist_angle_input, max_xy_mode_input, max_z_mode_input, compute_button, cmaps_column, links_pane])
-template.main.append(output_box)
+template = pn.template.BootstrapTemplate(title = 'DNA Electronic Quantum Vibrational Modes', sidebar = [distance_input, twist_angle_input, max_xy_mode_input, max_z_mode_input, compute_button, cmaps_column, links_pane])
+template.main.append(main_layout)
 template.servable()
 
 
