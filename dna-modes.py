@@ -130,7 +130,8 @@ def plot_frequencies(freqs_xy, freqs_z, dna_chain):
 
     fig, ax = plt.subplots(figsize = (4, 4))
 
-    ax.set_xlabel(dna_chain)
+    ax.set_xlabel('Modes')
+    ax.set_ylabel('Energy (Epo)')
 
     color_map = plt.get_cmap(cmaps_picker.value_name)
 
