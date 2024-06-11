@@ -9,6 +9,7 @@ import re
 
 
 pn.extension(notifications = True)
+notifications = pn.state.notifications
 pn.extension('tabulator')
 
 
@@ -22,8 +23,7 @@ freqs_z, modes_z = None, None
 
 # Input and output widgets
 
-control_width = 200
-margin = 20
+card_margin = 20
 
 dna_sequence_input = pn.widgets.TextInput(name = 'DNA sequence', placeholder = 'DNA sequence...', sizing_mode = 'stretch_width')
 dna_sequence_length_indicator = pn.indicators.Number(name = 'Length', value = 0, sizing_mode = 'stretch_width')
@@ -39,7 +39,7 @@ twist_angle_input = pn.widgets.FloatInput(name = 'Twist angle (rad)', value = pi
 plot_width_input = pn.widgets.FloatInput(name = 'Plot width (inches)', value = 8, step = 0.1, start = 0.1)
 plot_height_input = pn.widgets.FloatInput(name = 'Plot height (inches)', value = 6, step = 0.1, start = 0.1)
 
-plot_button = pn.widgets.Button(name = 'Plot selected vibrational modes', button_type = 'primary', margin = margin)
+plot_button = pn.widgets.Button(name = 'Plot selected vibrational modes', button_type = 'primary', margin = card_margin)
 
 
 
@@ -52,10 +52,12 @@ freqs_z_table = pn.widgets.Tabulator(show_index = False, disabled = True, select
 
 # Plot and HTML panes
 
-freqs_pane = pn.pane.Matplotlib(align = ('center', 'start'), sizing_mode = 'stretch_width')
-modes_pane = pn.pane.Matplotlib(align = ('center', 'start'), sizing_mode = 'stretch_width')
+pane_margin = 50
 
-links_pane = pn.pane.HTML('''<a href="https://doi.org/10.1016/j.jtbi.2015.11.018">Reference</a>''', margin = margin)
+freqs_pane = pn.pane.Matplotlib(align = ('center', 'start'), sizing_mode = 'stretch_width', margin = pane_margin)
+modes_pane = pn.pane.Matplotlib(align = ('center', 'start'), sizing_mode = 'stretch_width', margin = pane_margin)
+
+links_pane = pn.pane.HTML('''<a href="https://doi.org/10.1016/j.jtbi.2015.11.018">Reference</a>''')
 
 
 # Colormaps
@@ -78,7 +80,8 @@ def check_dna_sequence(event):
 
     for i, letter in enumerate(input_dna_sequence):
         if not letter in valid_letters:
-            pn.state.notifications.error(f"Invalid base '{letter}' found at position {i + 1}", duration = 7000)
+            notifications.error(f"Invalid base '{letter}' found at position {i + 1}", duration = 7000)
+
 
     # Delete invalid letters
     dna_sequence = re.sub('[^%s]' % valid_letters, '', input_dna_sequence)
@@ -94,9 +97,9 @@ def check_dna_sequence(event):
 
     # Update
 
-    event.obj.value_input = dna_sequence
+    event.obj.value_input = dna_sequence_lower
 
-    dna_sequence_length_indicator.value = len(dna_sequence)
+    dna_sequence_length_indicator.value = len(dna_sequence_lower)
 
     a_length_indicator.value = num_a
     t_length_indicator.value = num_t
@@ -257,7 +260,7 @@ def plot_frequencies():
 
     # Plot options
 
-    fig = Figure(figsize = (plot_width_input.value, plot_height_input.value))
+    fig = Figure(figsize = (plot_width_input.value, plot_height_input.value), layout = 'constrained')
     ax = fig.subplots()
 
     ax.set_xlabel('Modes')
@@ -266,6 +269,14 @@ def plot_frequencies():
     color_map = plt.get_cmap(cmaps_picker.value_name)
 
     ax.bar(tag, freqs, color = color_map(norm_idx))
+
+    # Remove tick labels to enhance visibility
+
+    tick_labels = ax.xaxis.get_majorticklabels()
+    if len(tick_labels) >= 20:
+        for i, label in enumerate(tick_labels):
+            if i % int(len(tick_labels) / 20) > 0:
+                label.set_visible(False)
 
     return fig
 
@@ -324,7 +335,7 @@ def plot_modes():
     nucleotids = [letter for letter in dna_sequence]
     ax.set_xticks(range(len(nucleotids)), nucleotids)
 
-    fig.legend(loc = 'outside lower center', ncols = 10, fontsize = 'small')
+    ax.legend(loc = 'upper left', bbox_to_anchor = (0.05, -0.2), ncol = 10, fontsize = 'x-small')
 
     return fig
 
@@ -399,7 +410,7 @@ def compute_vibrational_modes(event):
     # Checks
 
     if sequence_length < 2:
-        pn.state.notifications.error('Length of DNA chain smaller than 2!')
+        notifications.error('Length of DNA chain smaller than 2!')
         return
 
     # Build dynamic matrices
@@ -440,10 +451,10 @@ panes_layout = pn.Column(freqs_pane, modes_pane, sizing_mode = 'stretch_both')
 
 # Controls layout
 
-computation_parameters_card = pn.Card(distance_input, twist_angle_input, title = 'Parameters', margin = margin)
-xy_modes_card = pn.Card(freqs_xy_table, title = 'Transverse modes', margin = margin)
-t_modes_card = pn.Card(freqs_z_table, title = 'Longitudinal modes', margin = margin)
-plot_options_card = pn.Card(plot_width_input, plot_height_input, cmaps_picker, title = 'Plot options', margin = margin)
+computation_parameters_card = pn.Card(distance_input, twist_angle_input, title = 'Parameters', margin = card_margin)
+xy_modes_card = pn.Card(freqs_xy_table, title = 'Transverse modes', margin = card_margin)
+t_modes_card = pn.Card(freqs_z_table, title = 'Longitudinal modes', margin = card_margin)
+plot_options_card = pn.Card(plot_width_input, plot_height_input, cmaps_picker, title = 'Plot options', margin = card_margin)
 
 controls_layout = pn.FlexBox(xy_modes_card, t_modes_card, computation_parameters_card, plot_options_card, plot_button, flex_direction = 'row', sizing_mode = 'stretch_width')
 
