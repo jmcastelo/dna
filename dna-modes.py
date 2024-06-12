@@ -193,13 +193,13 @@ def set_dynamic_matrices():
 
 # Process egivenvalues and eigenvectors and get relevant quantities
 
-def get_frequencies_and_modes(eigenvalues, eigenvectors, transversal):
+def get_frequencies_and_modes(eigenvalues, eigenvectors, transverse):
     # Fundamental constants
 
-    ev = 1.602176634e-19
-    hbar = 6.62607015e-34 / (2 * pi)
+    ev = 1.602176634e-19 # Electronvolt
+    hbar = 6.62607015e-34 / (2 * pi) # Planck's constant
     e_PO = 0.23 # Reference Energy
-    me = 9.1093837015e-31
+    me = 9.1093837015e-31 # Electron mass
 
     # Keep positive eigenvalues only
 
@@ -209,18 +209,17 @@ def get_frequencies_and_modes(eigenvalues, eigenvectors, transversal):
             negative.append(i)
 
     freqs = delete(eigenvalues, negative)
-    modes = delete(eigenvectors, negative, 0)
-
-    half_comp = int(modes.shape[1] / 2)
+    modes = delete(eigenvectors, negative, 1)
 
     # Compute quantities of interest
 
     frequencies = sqrt(freqs / me) * hbar / (2.0 * e_PO * ev)
 
-    if transversal:
-        mode_amplitudes = array([[abs(modes[vec, comp]) ** 2 + abs(modes[vec, half_comp + comp]) ** 2 for comp in range(half_comp)] for vec in range(modes.shape[0])])
+    if transverse:
+        half_comp = int(modes.shape[0] / 2)
+        mode_amplitudes = array([[abs(modes[comp, vec]) ** 2 + abs(modes[half_comp + comp, vec]) ** 2 for comp in range(half_comp)] for vec in range(modes.shape[1])])
     else:
-        mode_amplitudes = array([[abs(modes[vec, comp]) ** 2 for comp in range(modes.shape[1])] for vec in range(modes.shape[0])])
+        mode_amplitudes = array([[abs(modes[comp, vec]) ** 2 for comp in range(modes.shape[0])] for vec in range(modes.shape[1])])
 
     return frequencies, mode_amplitudes
 
@@ -244,6 +243,8 @@ def plot_frequencies():
     tag_z = [f"L{i}" for i in sel_idx_z]
 
     tag = tag_xy + tag_z
+
+    # Select frequencies
 
     sel_freqs_xy = freqs_xy[sel_idx_xy]
     sel_freqs_z = freqs_z[sel_idx_z]
@@ -305,6 +306,8 @@ def plot_modes():
     marker_z = ['.:' for i in sel_idx_z]
     marker = marker_xy + marker_z
 
+    # Select modes
+
     sel_modes_xy = modes_xy[sel_idx_xy]
     sel_modes_z = modes_z[sel_idx_z]
 
@@ -341,21 +344,6 @@ def plot_modes():
 
 
 
-def set_outputs(event):
-    # Set plots
-
-    fig_freqs = plot_frequencies()
-    freqs_pane.object = fig_freqs
-
-    fig_modes = plot_modes()
-    modes_pane.object = fig_modes
-
-
-
-pn.bind(set_outputs, plot_button, watch = True)
-
-
-
 # Frequencies/energies tables
 
 def set_freqs_xy_table_data():
@@ -389,6 +377,21 @@ def set_freqs_z_table_data():
     }, index = idx)
 
     freqs_z_table.value = df
+
+
+
+# Set plots
+
+def set_outputs(event):
+    fig_freqs = plot_frequencies()
+    freqs_pane.object = fig_freqs
+
+    fig_modes = plot_modes()
+    modes_pane.object = fig_modes
+
+
+
+pn.bind(set_outputs, plot_button, watch = True)
 
 
 
