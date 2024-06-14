@@ -5,6 +5,9 @@ from matplotlib import colormaps
 import pandas as pd
 import panel as pn
 import re
+from io import BytesIO
+import zipfile
+from datetime import datetime
 
 
 
@@ -14,16 +17,19 @@ pn.extension('tabulator')
 
 
 
-# Data structures
+# Global arrays
 
-freqs_xy, modes_xy = None, None
-freqs_z, modes_z = None, None
+Vxy, Vz = None, None
+
+eigenvalues_xy, eigenvectors_xy = None, None
+eigenvalues_z, eigenvectors_z = None, None
+
+energies_xy, modes_xy = None, None
+energies_z, modes_z = None, None
 
 
 
 # Input and output widgets
-
-card_margin = 20
 
 dna_sequence_input = pn.widgets.TextInput(name = 'DNA sequence', placeholder = 'DNA sequence...', sizing_mode = 'stretch_width')
 dna_sequence_length_indicator = pn.indicators.Number(name = 'Length', value = 0, sizing_mode = 'stretch_width')
@@ -39,14 +45,15 @@ twist_angle_input = pn.widgets.FloatInput(name = 'Twist angle (rad)', value = pi
 plot_width_input = pn.widgets.FloatInput(name = 'Plot width (inches)', value = 8, step = 0.1, start = 0.1)
 plot_height_input = pn.widgets.FloatInput(name = 'Plot height (inches)', value = 6, step = 0.1, start = 0.1)
 
-plot_button = pn.widgets.Button(name = 'Plot selected vibrational modes', button_type = 'primary', margin = card_margin)
+plot_button = pn.widgets.Button(name = 'Plot selected vibrational modes', disabled = True,  button_type = 'primary')
+data_download_button = pn.widgets.FileDownload(label = 'Download input and output data', disabled = True, button_type = 'primary')
 
 
 
 # Output tables
 
-freqs_xy_table = pn.widgets.Tabulator(show_index = False, disabled = True, selectable = 'checkbox', pagination = 'local', page_size = 10, align = ('start'))
-freqs_z_table = pn.widgets.Tabulator(show_index = False, disabled = True, selectable = 'checkbox', pagination = 'local', page_size = 10, align = ('start'))
+energies_xy_table = pn.widgets.Tabulator(show_index = False, disabled = True, selectable = 'checkbox', pagination = 'local', page_size = 10, align = ('start'))
+energies_z_table = pn.widgets.Tabulator(show_index = False, disabled = True, selectable = 'checkbox', pagination = 'local', page_size = 10, align = ('start'))
 
 
 
@@ -54,7 +61,7 @@ freqs_z_table = pn.widgets.Tabulator(show_index = False, disabled = True, select
 
 pane_margin = 50
 
-freqs_pane = pn.pane.Matplotlib(align = ('center', 'start'), sizing_mode = 'stretch_width', margin = pane_margin)
+energies_pane = pn.pane.Matplotlib(align = ('center', 'start'), sizing_mode = 'stretch_width', margin = pane_margin)
 modes_pane = pn.pane.Matplotlib(align = ('center', 'start'), sizing_mode = 'stretch_width', margin = pane_margin)
 
 links_pane = pn.pane.HTML('''<a href="https://doi.org/10.1016/j.jtbi.2015.11.018">Reference</a>''')
@@ -158,6 +165,8 @@ def set_dynamic_matrices():
 
     # Longitudinal potential matrix
 
+    global Vz
+
     Vz = zeros([sequence_length, sequence_length])
 
     for i in range(sequence_length):
@@ -168,6 +177,8 @@ def set_dynamic_matrices():
         Vz[i + 1, i] = gamma['zz']
 
     # Transverse potential matrix
+
+    global Vxy
 
     Vxy = zeros([2 * sequence_length, 2 * sequence_length])
 
@@ -187,13 +198,11 @@ def set_dynamic_matrices():
         Vxy[i + 1, sequence_length + i] = -gamma['xy']
         Vxy[sequence_length + i, i + 1] = -gamma['xy']
 
-    return Vxy, Vz
 
 
+# Process eigenvalues and eigenvectors and get relevant quantities
 
-# Process egivenvalues and eigenvectors and get relevant quantities
-
-def get_frequencies_and_modes(eigenvalues, eigenvectors, transverse):
+def get_energies_and_amplitudes(eigenvalues, eigenvectors, transverse):
     # Fundamental constants
 
     ev = 1.602176634e-19 # Electronvolt
@@ -208,30 +217,30 @@ def get_frequencies_and_modes(eigenvalues, eigenvectors, transverse):
         if eigenvalues[i] < 0:
             negative.append(i)
 
-    freqs = delete(eigenvalues, negative)
-    modes = delete(eigenvectors, negative, 1)
+    values = delete(eigenvalues, negative)
+    vectors = delete(eigenvectors, negative, 1)
 
     # Compute quantities of interest
 
-    frequencies = sqrt(freqs / me) * hbar / (2.0 * e_PO * ev)
+    energies = sqrt(values / me) * hbar / (2.0 * e_PO * ev)
 
     if transverse:
-        half_comp = int(modes.shape[0] / 2)
-        mode_amplitudes = array([[abs(modes[comp, vec]) ** 2 + abs(modes[half_comp + comp, vec]) ** 2 for comp in range(half_comp)] for vec in range(modes.shape[1])])
+        half_comp = int(vectors.shape[0] / 2)
+        amplitudes = array([[abs(vectors[comp, vec]) ** 2 + abs(vectors[half_comp + comp, vec]) ** 2 for comp in range(half_comp)] for vec in range(vectors.shape[1])])
     else:
-        mode_amplitudes = array([[abs(modes[comp, vec]) ** 2 for comp in range(modes.shape[0])] for vec in range(modes.shape[1])])
+        amplitudes = array([[abs(vectors[comp, vec]) ** 2 for comp in range(vectors.shape[0])] for vec in range(vectors.shape[1])])
 
-    return frequencies, mode_amplitudes
+    return energies, amplitudes
 
 
 
-# Plot frequencies/energies
+# Plot energies
 
-def plot_frequencies():
+def plot_energies():
     # Construct tags and indexes for selected transverse and longitudinal modes
 
-    sel_idx_xy = freqs_xy_table.selection
-    sel_idx_z = freqs_z_table.selection
+    sel_idx_xy = energies_xy_table.selection
+    sel_idx_z = energies_z_table.selection
 
     if len(sel_idx_xy) + len(sel_idx_z) <= 0:
         return
@@ -246,18 +255,18 @@ def plot_frequencies():
 
     # Select frequencies
 
-    sel_freqs_xy = freqs_xy[sel_idx_xy]
-    sel_freqs_z = freqs_z[sel_idx_z]
+    sel_energies_xy = energies_xy[sel_idx_xy]
+    sel_energies_z = energies_z[sel_idx_z]
 
     # Construct indexes for colormap
 
-    max_len = max(len(freqs_xy) - 1, len(freqs_z) - 1)
+    max_len = max(len(energies_xy) - 1, len(energies_z) - 1)
     norm_idx_xy = [s / max_len for s in sel_idx_xy]
     norm_idx_z = [s / max_len for s in sel_idx_z]
     norm_idx = norm_idx_xy + norm_idx_z
 
     # Join lists
-    freqs = sel_freqs_xy.tolist() + sel_freqs_z.tolist()
+    freqs = sel_energies_xy.tolist() + sel_energies_z.tolist()
 
     # Plot options
 
@@ -288,8 +297,8 @@ def plot_frequencies():
 def plot_modes():
     # Construct tags and markers for selected transverse and longitudinal modes
 
-    sel_idx_xy = freqs_xy_table.selection
-    sel_idx_z = freqs_z_table.selection
+    sel_idx_xy = energies_xy_table.selection
+    sel_idx_z = energies_z_table.selection
 
     if len(sel_idx_xy) + len(sel_idx_z) <= 0:
         return
@@ -344,47 +353,47 @@ def plot_modes():
 
 
 
-# Frequencies/energies tables
+# Energies tables
 
-def set_freqs_xy_table_data():
+def set_energies_xy_table_data():
     # Tags
 
-    idx = list(range(len(freqs_xy)))
+    idx = list(range(len(energies_xy)))
     tag = [f"T{i:03d}" for i in idx]
 
     # Data
 
     df = pd.DataFrame({
         'Modes': tag,
-        'Energies (Epo)': freqs_xy.tolist()
+        'Energies (Epo)': energies_xy.tolist()
     }, index = idx)
 
-    freqs_xy_table.value = df
+    energies_xy_table.value = df
 
 
 
-def set_freqs_z_table_data():
+def set_energies_z_table_data():
     # Tags
 
-    idx = list(range(len(freqs_z)))
+    idx = list(range(len(energies_z)))
     tag = [f"L{i:03d}" for i in idx]
 
     # Data
 
     df = pd.DataFrame({
         'Modes': tag,
-        'Energies (Epo)': freqs_z.tolist()
+        'Energies (Epo)': energies_z.tolist()
     }, index = idx)
 
-    freqs_z_table.value = df
+    energies_z_table.value = df
 
 
 
 # Set plots
 
 def set_outputs(event):
-    fig_freqs = plot_frequencies()
-    freqs_pane.object = fig_freqs
+    fig_energies = plot_energies()
+    energies_pane.object = fig_energies
 
     fig_modes = plot_modes()
     modes_pane.object = fig_modes
@@ -398,7 +407,7 @@ pn.bind(set_outputs, plot_button, watch = True)
 # Remove plots
 
 def clear_outputs():
-    freqs_pane.object = None
+    energies_pane.object = None
     modes_pane.object = None
 
 
@@ -418,26 +427,33 @@ def compute_vibrational_modes(event):
 
     # Build dynamic matrices
 
-    Vxy, Vz = set_dynamic_matrices()
+    set_dynamic_matrices()
 
     # Diagonalize dynamic matrices
+
+    global eigenvalues_xy, eigenvectors_xy
+    global eigenvalues_z, eigenvectors_z
 
     eigenvalues_xy, eigenvectors_xy = linalg.eigh(Vxy)
     eigenvalues_z, eigenvectors_z = linalg.eigh(Vz)
 
     # Get frequencies and modes
 
-    global freqs_xy, modes_xy
-    global freqs_z, modes_z
+    global energies_xy, modes_xy
+    global energies_z, modes_z
 
-    freqs_xy, modes_xy = get_frequencies_and_modes(eigenvalues_xy, eigenvectors_xy, True)
-    freqs_z, modes_z = get_frequencies_and_modes(eigenvalues_z, eigenvectors_z, False)
+    energies_xy, modes_xy = get_energies_and_amplitudes(eigenvalues_xy, eigenvectors_xy, True)
+    energies_z, modes_z = get_energies_and_amplitudes(eigenvalues_z, eigenvectors_z, False)
 
-    set_freqs_xy_table_data()
-    set_freqs_z_table_data()
+    set_energies_xy_table_data()
+    set_energies_z_table_data()
 
     # Clear plots
     clear_outputs()
+
+    # Enable action buttons
+    plot_button.disabled = False
+    data_download_button.disabled = False
 
 
 
@@ -447,19 +463,96 @@ twist_angle_input.param.watch(compute_vibrational_modes, 'value')
 
 
 
+# Set in-memory zip with input and output data
+
+def get_zip_data():
+    # Set data zip filename
+
+    now = datetime.now()
+    name = now.strftime("dna_data_%Y-%m-%d_%Hh%Mm%Ss")
+    data_download_button.filename = name + '.zip'
+
+    # Prepare parameters data
+
+    parameters_df = pd.DataFrame({
+        'DNA Sequence': dna_sequence_input.value.upper(),
+        'Distance (Angstrom)': distance_input.value,
+        'Twist Angle (rad)': twist_angle_input.value
+    }, index = [0])
+
+    # Prepare CSV data
+
+    data_csv = [
+        ('parameters.csv', BytesIO(parameters_df.to_csv(index = False, header = True).encode())),
+        ('Vxy.csv', BytesIO(pd.DataFrame(Vxy).to_csv(index = False, header = False).encode())),
+        ('Vz.csv', BytesIO(pd.DataFrame(Vz).to_csv(index = False, header = False).encode())),
+        ('eigenvalues_xy.csv', BytesIO(pd.DataFrame(eigenvalues_xy).to_csv(index = False, header = False).encode())),
+        ('eigenvalues_z.csv', BytesIO(pd.DataFrame(eigenvalues_z).to_csv(index = False, header = False).encode())),
+        ('eigenvectors_xy.csv', BytesIO(pd.DataFrame(eigenvectors_xy).to_csv(index = False, header = False).encode())),
+        ('eigenvectors_z.csv', BytesIO(pd.DataFrame(eigenvectors_z).to_csv(index = False, header = False).encode())),
+        ('energies_xy.csv', BytesIO(pd.DataFrame(energies_xy).to_csv(index = False, header = False).encode())),
+        ('energies_z.csv', BytesIO(pd.DataFrame(energies_z).to_csv(index = False, header = False).encode())),
+        ('amplitudes_xy.csv', BytesIO(pd.DataFrame(modes_xy).to_csv(index = False, header = False).encode())),
+        ('amplitudes_z.csv', BytesIO(pd.DataFrame(modes_z).to_csv(index = False, header = False).encode()))
+    ]
+
+    # Prepare JSON data
+
+    data_json = [
+        ('parameters.json', BytesIO(parameters_df.to_json(orient = 'records').encode())),
+        ('Vxy.json', BytesIO(pd.DataFrame(Vxy, index = [f"row {i}" for i in range(Vxy.shape[0])], columns = [f"col {i}" for i in range(Vxy.shape[1])]).to_json(orient = 'index').encode())),
+        ('Vz.json', BytesIO(pd.DataFrame(Vz, index = [f"row {i}" for i in range(Vz.shape[0])], columns = [f"col {i}" for i in range(Vz.shape[1])]).to_json(orient = 'index').encode())),
+        ('eigenvalues_xy.json', BytesIO(pd.DataFrame([eigenvalues_xy], columns = list(range(len(eigenvalues_xy)))).to_json(orient = 'values').encode())),
+        ('eigenvalues_z.json', BytesIO(pd.DataFrame([eigenvalues_z], columns = list(range(len(eigenvalues_z)))).to_json(orient = 'values').encode())),
+        ('eigenvectors_xy.json', BytesIO(pd.DataFrame(eigenvectors_xy, index = list(range(eigenvectors_xy.shape[0])), columns = [f"vector {i}" for i in range(eigenvectors_xy.shape[1])]).to_json(orient = 'columns').encode())),
+        ('eigenvectors_z.json', BytesIO(pd.DataFrame(eigenvectors_z, index = list(range(eigenvectors_z.shape[0])), columns = [f"vector {i}" for i in range(eigenvectors_z.shape[1])]).to_json(orient = 'columns').encode())),
+        ('energies_xy.json', BytesIO(pd.DataFrame([energies_xy], columns = list(range(len(energies_xy)))).to_json(orient = 'values').encode())),
+        ('energies_z.json', BytesIO(pd.DataFrame([energies_z], columns = list(range(len(energies_z)))).to_json(orient = 'values').encode())),
+        ('amplitudes_xy.json', BytesIO(pd.DataFrame(modes_xy, index = list(range(modes_xy.shape[0])), columns = [f"mode {i}" for i in range(modes_xy.shape[1])]).to_json(orient = 'columns').encode())),
+        ('amplitudes_z.json', BytesIO(pd.DataFrame(modes_z, index = list(range(modes_z.shape[0])), columns = [f"mode {i}" for i in range(modes_z.shape[1])]).to_json(orient = 'columns').encode()))
+    ]
+
+    # Make zip file to download
+
+    zip_buffer = BytesIO()
+
+    with zipfile.ZipFile(zip_buffer, 'a', zipfile.ZIP_DEFLATED) as archive:
+        archive.mkdir(name)
+        # CSV
+        archive.mkdir(name + '/csv')
+        for file_name, file_data in data_csv:
+            archive.writestr(name + '/csv/' + file_name, file_data.getvalue())
+        # JSON
+        archive.mkdir(name + '/json')
+        for file_name, file_data in data_json:
+            archive.writestr(name + '/json/' + file_name, file_data.getvalue())
+
+    zip_buffer.seek(0)
+
+    return zip_buffer
+
+
+
+data_download_button.callback = get_zip_data
+
+
+
 # Output layouts
 
 counts_layout = pn.Row(dna_sequence_length_indicator, a_length_indicator, t_length_indicator, c_length_indicator, g_length_indicator, sizing_mode = 'stretch_width')
-panes_layout = pn.Column(freqs_pane, modes_pane, sizing_mode = 'stretch_both')
+panes_layout = pn.Column(energies_pane, modes_pane, sizing_mode = 'stretch_both')
 
-# Controls layout
+# Controls cards
+
+card_margin = 20
 
 computation_parameters_card = pn.Card(distance_input, twist_angle_input, title = 'Parameters', margin = card_margin)
-xy_modes_card = pn.Card(freqs_xy_table, title = 'Transverse modes', margin = card_margin)
-t_modes_card = pn.Card(freqs_z_table, title = 'Longitudinal modes', margin = card_margin)
+xy_modes_card = pn.Card(energies_xy_table, title = 'Transverse modes', margin = card_margin)
+t_modes_card = pn.Card(energies_z_table, title = 'Longitudinal modes', margin = card_margin)
 plot_options_card = pn.Card(plot_width_input, plot_height_input, cmaps_picker, title = 'Plot options', margin = card_margin)
+actions_card = pn.Card(plot_button, data_download_button, title = 'Actions', margin = card_margin)
 
-controls_layout = pn.FlexBox(xy_modes_card, t_modes_card, computation_parameters_card, plot_options_card, plot_button, flex_direction = 'row', sizing_mode = 'stretch_width')
+controls_layout = pn.FlexBox(xy_modes_card, t_modes_card, computation_parameters_card, plot_options_card, actions_card, flex_direction = 'row', sizing_mode = 'stretch_width')
 
 # Main layout
 
